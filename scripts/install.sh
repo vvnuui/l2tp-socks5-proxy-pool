@@ -150,48 +150,109 @@ EOF
 configure_ppp_hooks() {
     log_info "配置 PPP 钩子脚本..."
 
-    # ip-up 钩子
+    # ip-up 钩子（包含 Gost 自动启动）
     cat > /etc/ppp/ip-up.d/99-socks-proxy << EOF
 #!/bin/bash
 #
 # PPP 连接建立时的回调脚本
+# 1. 通知 API 客户端上线
+# 2. 自动启动 Gost 代理
 #
 
 INTERFACE=\$1
 TTY=\$2
 SPEED=\$3
-LOCAL_IP=\$4
-PEER_IP=\$5
+LOCAL_IP=\$4    # 服务器 IP (10.0.0.1)
+PEER_IP=\$5     # 客户端分配的 IP (10.0.0.2)
 IPPARAM=\$6
 
-# API 配置
+# 配置
 API_URL="${API_URL}"
 TOKEN="${PPP_HOOK_TOKEN}"
+GOST_BIN="/usr/local/bin/gost"
+GOST_LOG_DIR="/var/log/gost"
+GOST_PID_DIR="/var/run/gost"
 
 # 记录日志
-logger -t ppp-hook "ip-up: interface=\$INTERFACE local=\$LOCAL_IP peer=\$PEER_IP"
+logger -t ppp-hook "ip-up: interface=\$INTERFACE server=\$LOCAL_IP client=\$PEER_IP"
 
-# 回调 API
-curl -s -X POST "\${API_URL}/api/connections/ppp_callback/" \\
+# 创建目录
+mkdir -p "\$GOST_LOG_DIR" "\$GOST_PID_DIR"
+
+# 回调 API 通知上线
+RESPONSE=\$(curl -s -X POST "\${API_URL}/api/ppp/callback/" \\
     -H "Content-Type: application/json" \\
     -H "X-PPP-Token: \${TOKEN}" \\
-    -d "{
-        \"action\": \"up\",
-        \"interface\": \"\$INTERFACE\",
-        \"local_ip\": \"\$LOCAL_IP\",
-        \"peer_ip\": \"\$PEER_IP\",
-        \"username\": \"\$PEERNAME\"
-    }" || true
+    -d "{\"action\": \"up\", \"interface\": \"\$INTERFACE\", \"local_ip\": \"\$PEER_IP\", \"peer_ip\": \"\$LOCAL_IP\", \"username\": \"\$PEERNAME\"}")
+
+logger -t ppp-hook "API response: \$RESPONSE"
+
+# 解析账号 ID
+ACCOUNT_ID=\$(echo "\$RESPONSE" | sed -n 's/.*"account_id":\([0-9]*\).*/\1/p')
+
+if [ -z "\$ACCOUNT_ID" ]; then
+    logger -t ppp-hook "Failed to get account_id from API"
+    exit 0
+fi
+
+# 查询代理配置
+PROXY_INFO=\$(curl -s "\${API_URL}/api/proxies/?account=\${ACCOUNT_ID}")
+
+# 解析代理端口和自动启动设置
+PORT=\$(echo "\$PROXY_INFO" | sed -n 's/.*"listen_port":\([0-9]*\).*/\1/p' | head -1)
+AUTO_START=\$(echo "\$PROXY_INFO" | sed -n 's/.*"auto_start":\([a-z]*\).*/\1/p' | head -1)
+
+logger -t ppp-hook "Account: \$ACCOUNT_ID, Port: \$PORT, AutoStart: \$AUTO_START"
+
+# 检查是否需要启动 Gost
+if [ -z "\$PORT" ]; then
+    logger -t ppp-hook "No proxy port configured for account \$ACCOUNT_ID"
+    exit 0
+fi
+
+if [ "\$AUTO_START" != "true" ]; then
+    logger -t ppp-hook "Auto start disabled for port \$PORT"
+    exit 0
+fi
+
+# 检查 Gost 是否安装
+if [ ! -x "\$GOST_BIN" ]; then
+    logger -t ppp-hook "Gost not found at \$GOST_BIN"
+    exit 0
+fi
+
+# 停止已存在的 Gost 进程
+PID_FILE="\$GOST_PID_DIR/gost_\${PORT}.pid"
+if [ -f "\$PID_FILE" ]; then
+    OLD_PID=\$(cat "\$PID_FILE")
+    if kill -0 "\$OLD_PID" 2>/dev/null; then
+        kill "\$OLD_PID" 2>/dev/null
+        sleep 1
+    fi
+    rm -f "\$PID_FILE"
+fi
+
+# 启动 Gost 代理
+LOG_FILE="\$GOST_LOG_DIR/gost_\${PORT}.log"
+\$GOST_BIN -L "socks5://:\${PORT}?interface=\${INTERFACE}" \\
+    >> "\$LOG_FILE" 2>&1 &
+
+NEW_PID=\$!
+echo "\$NEW_PID" > "\$PID_FILE"
+
+logger -t ppp-hook "Started Gost PID=\$NEW_PID on port \$PORT via \$INTERFACE"
 
 exit 0
 EOF
     chmod +x /etc/ppp/ip-up.d/99-socks-proxy
 
-    # ip-down 钩子
+    # ip-down 钩子（包含 Gost 自动停止）
     cat > /etc/ppp/ip-down.d/99-socks-proxy << EOF
 #!/bin/bash
 #
 # PPP 连接断开时的回调脚本
+# 1. 通知 API 客户端下线
+# 2. 自动停止 Gost 代理
 #
 
 INTERFACE=\$1
@@ -201,24 +262,38 @@ LOCAL_IP=\$4
 PEER_IP=\$5
 IPPARAM=\$6
 
-# API 配置
+# 配置
 API_URL="${API_URL}"
 TOKEN="${PPP_HOOK_TOKEN}"
+GOST_PID_DIR="/var/run/gost"
 
 # 记录日志
-logger -t ppp-hook "ip-down: interface=\$INTERFACE local=\$LOCAL_IP peer=\$PEER_IP"
+logger -t ppp-hook "ip-down: interface=\$INTERFACE server=\$LOCAL_IP client=\$PEER_IP"
 
-# 回调 API
-curl -s -X POST "\${API_URL}/api/connections/ppp_callback/" \\
+# 回调 API 通知下线
+curl -s -X POST "\${API_URL}/api/ppp/callback/" \\
     -H "Content-Type: application/json" \\
     -H "X-PPP-Token: \${TOKEN}" \\
-    -d "{
-        \"action\": \"down\",
-        \"interface\": \"\$INTERFACE\",
-        \"local_ip\": \"\$LOCAL_IP\",
-        \"peer_ip\": \"\$PEER_IP\",
-        \"username\": \"\$PEERNAME\"
-    }" || true
+    -d "{\"action\": \"down\", \"interface\": \"\$INTERFACE\", \"local_ip\": \"\$PEER_IP\", \"peer_ip\": \"\$LOCAL_IP\"}" || true
+
+# 停止通过该接口的 Gost 进程
+for PID_FILE in "\$GOST_PID_DIR"/gost_*.pid; do
+    if [ -f "\$PID_FILE" ]; then
+        PID=\$(cat "\$PID_FILE")
+        PORT=\$(basename "\$PID_FILE" | sed 's/gost_\([0-9]*\)\.pid/\1/')
+
+        if kill -0 "\$PID" 2>/dev/null; then
+            # 检查进程命令行是否包含该接口
+            if grep -q "\$INTERFACE" /proc/\$PID/cmdline 2>/dev/null; then
+                kill "\$PID" 2>/dev/null
+                rm -f "\$PID_FILE"
+                logger -t ppp-hook "Stopped Gost PID=\$PID on port \$PORT"
+            fi
+        else
+            rm -f "\$PID_FILE"
+        fi
+    fi
+done
 
 exit 0
 EOF

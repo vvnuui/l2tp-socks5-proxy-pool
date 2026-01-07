@@ -55,9 +55,11 @@ services:
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - backend_logs:/app/logs
-      # 挂载主机目录用于网络操作 (可选)
-      # - /etc/ppp:/etc/ppp:ro
-      # - /var/log/gost:/var/log/gost
+      # 挂载主机目录用于网络操作
+      - /etc/ppp:/etc/ppp
+      - /etc/iproute2:/etc/iproute2
+      - /var/log/gost:/var/log/gost
+      - /var/run/gost:/var/run/gost
     ports:
       - "8000:8000"
     depends_on:

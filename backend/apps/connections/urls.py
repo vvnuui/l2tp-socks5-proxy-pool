@@ -9,6 +9,7 @@ router = DefaultRouter()
 router.register(r'connections', ConnectionViewSet, basename='connection')
 
 urlpatterns = [
+    # PPP 回调必须放在 router 之前，否则会被匹配为 /connections/<pk>/
+    path('ppp/callback/', PPPCallbackView.as_view(), name='ppp-callback'),
     path('', include(router.urls)),
-    path('connections/ppp_callback/', PPPCallbackView.as_view(), name='ppp-callback'),
 ]
