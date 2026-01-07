@@ -216,9 +216,14 @@ class DashboardView(APIView):
         connections_online = Connection.objects.filter(status='online').count()
         proxies_running = ProxyConfig.objects.filter(is_running=True).count()
 
-        # 获取 PPP 接口列表
-        routing_service = RoutingService()
-        ppp_interfaces = routing_service.list_ppp_interfaces()
+        # 获取 PPP 接口列表（容器内可能没有 ip 命令，需要捕获异常）
+        ppp_interfaces = []
+        try:
+            routing_service = RoutingService()
+            ppp_interfaces = routing_service.list_ppp_interfaces()
+        except Exception:
+            # 在 Docker 容器中可能没有网络工具，忽略错误
+            pass
 
         # 最近连接
         recent_connections = Connection.objects.filter(status='online').select_related('account')[:10]

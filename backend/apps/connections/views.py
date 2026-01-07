@@ -15,11 +15,7 @@ from apps.network.models import ProxyConfig, RoutingTable
 from apps.network.services import GostService, RoutingService
 
 from .models import Connection
-from .serializers import (
-    ConnectionOfflineSerializer,
-    ConnectionOnlineSerializer,
-    ConnectionSerializer,
-)
+from .serializers import ConnectionSerializer
 
 
 class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
@@ -59,48 +55,59 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
 
-class ConnectionCallbackView(APIView):
-    """PPP 钩子回调接口"""
+class PPPCallbackView(APIView):
+    """PPP 钩子统一回调接口"""
 
     permission_classes = [AllowAny]
 
     def _verify_token(self, request):
         """验证 Token"""
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Token '):
-            token = auth_header[6:]
-            return token == settings.PPP_HOOK_TOKEN
-        return False
+        # 支持多种 header 格式
+        token = request.headers.get('X-PPP-Token', '')
+        if not token:
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Token '):
+                token = auth_header[6:]
+        return token == settings.PPP_HOOK_TOKEN
 
-    def post(self, request, action_type):
-        """处理上线/下线回调"""
+    def post(self, request):
+        """处理 PPP 回调"""
         if not self._verify_token(request):
             return Response({'error': '认证失败'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if action_type == 'online':
+        action = request.data.get('action')
+        if action == 'up':
             return self._handle_online(request)
-        elif action_type == 'offline':
+        elif action == 'down':
             return self._handle_offline(request)
         else:
-            return Response({'error': '无效的操作类型'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '无效的 action'}, status=status.HTTP_400_BAD_REQUEST)
 
     def _handle_online(self, request):
         """处理 Client 上线"""
-        serializer = ConnectionOnlineSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        interface = request.data.get('interface')
+        local_ip = request.data.get('local_ip')
+        peer_ip = request.data.get('peer_ip', '0.0.0.0')
+        username = request.data.get('username', '')
 
-        data = serializer.validated_data
-        interface = data['interface']
-        local_ip = data['local_ip']
-        peer_ip = data.get('peer_ip', '0.0.0.0')
+        if not interface or not local_ip:
+            return Response({'error': '缺少必要参数'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 查找账号
+        # 查找账号（优先通过 IP，其次通过用户名）
+        account = None
         try:
             account = L2TPAccount.objects.get(assigned_ip=local_ip)
         except L2TPAccount.DoesNotExist:
-            SystemLog.log_error('connection', f'未知 IP 上线: {local_ip}', details={'interface': interface})
-            return Response({'error': f'未找到 IP {local_ip} 对应的账号'}, status=status.HTTP_404_NOT_FOUND)
+            if username:
+                try:
+                    account = L2TPAccount.objects.get(username=username)
+                except L2TPAccount.DoesNotExist:
+                    pass
+
+        if not account:
+            SystemLog.log_error('connection', f'未知连接上线: IP={local_ip}, user={username}',
+                              details={'interface': interface})
+            return Response({'error': '未找到对应的账号'}, status=status.HTTP_404_NOT_FOUND)
 
         # 关闭之前的连接
         Connection.objects.filter(account=account, status='online').update(
@@ -117,7 +124,7 @@ class ConnectionCallbackView(APIView):
             status='online'
         )
 
-        # 更新路由表
+        # 更新路由表和启动代理（容器内可能不可用）
         try:
             routing_table = account.routing_table
             routing_table.interface = interface
@@ -149,7 +156,6 @@ class ConnectionCallbackView(APIView):
                         proxy_config.save()
                     except Exception as e:
                         SystemLog.log_error('proxy', f'自动启动代理失败: {e}', account=account)
-
         except Exception as e:
             SystemLog.log_error('routing', f'配置路由失败: {e}', account=account)
 
@@ -168,28 +174,34 @@ class ConnectionCallbackView(APIView):
 
     def _handle_offline(self, request):
         """处理 Client 下线"""
-        serializer = ConnectionOfflineSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        interface = request.data.get('interface')
+        local_ip = request.data.get('local_ip', '')
 
-        interface = serializer.validated_data['interface']
+        if not interface:
+            return Response({'error': '缺少 interface 参数'}, status=status.HTTP_400_BAD_REQUEST)
 
         # 查找连接
         connection = Connection.get_by_interface(interface)
+        if not connection and local_ip:
+            connection = Connection.get_by_ip(local_ip)
+
         if not connection:
             return Response({'error': '未找到连接'}, status=status.HTTP_404_NOT_FOUND)
 
         account = connection.account
 
-        # 停止代理
-        if account.proxy_config and account.proxy_config.is_running:
-            gost_service = GostService()
-            gost_service.stop(account.proxy_config.listen_port)
-            account.proxy_config.is_running = False
-            account.proxy_config.gost_pid = None
-            account.proxy_config.save()
+        # 停止代理（容器内可能不可用）
+        try:
+            if account.proxy_config and account.proxy_config.is_running:
+                gost_service = GostService()
+                gost_service.stop(account.proxy_config.listen_port)
+                account.proxy_config.is_running = False
+                account.proxy_config.gost_pid = None
+                account.proxy_config.save()
+        except Exception:
+            pass
 
-        # 清理路由
+        # 清理路由（容器内可能不可用）
         try:
             routing_table = account.routing_table
             if routing_table.is_active:

@@ -4,8 +4,15 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/login',
+      name: 'Login',
+      component: () => import('@/views/Login.vue'),
+      meta: { title: '登录', public: true }
+    },
+    {
       path: '/',
       component: () => import('@/layouts/DefaultLayout.vue'),
+      meta: { requiresAuth: true },
       children: [
         {
           path: '',
@@ -44,7 +51,17 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   document.title = `${to.meta.title || 'L2TP Socks5'} - 代理管理系统`
-  next()
+
+  const token = localStorage.getItem('token')
+  const isPublic = to.meta.public === true
+
+  if (!token && !isPublic) {
+    next('/login')
+  } else if (token && to.path === '/login') {
+    next('/')
+  } else {
+    next()
+  }
 })
 
 export default router

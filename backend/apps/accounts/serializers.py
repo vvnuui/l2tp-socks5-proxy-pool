@@ -58,6 +58,7 @@ class L2TPAccountCreateSerializer(serializers.ModelSerializer):
 
     auto_assign_ip = serializers.BooleanField(default=True, write_only=True)
     auto_create_proxy = serializers.BooleanField(default=True, write_only=True)
+    assigned_ip = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = L2TPAccount
@@ -71,12 +72,21 @@ class L2TPAccountCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         auto_assign_ip = attrs.pop('auto_assign_ip', True)
+        assigned_ip = attrs.get('assigned_ip', '')
 
-        if auto_assign_ip and not attrs.get('assigned_ip'):
+        # 如果自动分配或者 IP 为空，则自动获取下一个可用 IP
+        if auto_assign_ip or not assigned_ip:
             next_ip = L2TPAccount.get_next_available_ip()
             if not next_ip:
                 raise serializers.ValidationError({'assigned_ip': 'IP 地址池已耗尽'})
             attrs['assigned_ip'] = next_ip
+        else:
+            # 验证 IP 地址格式
+            import ipaddress
+            try:
+                ipaddress.ip_address(assigned_ip)
+            except ValueError:
+                raise serializers.ValidationError({'assigned_ip': '无效的 IP 地址'})
 
         return attrs
 

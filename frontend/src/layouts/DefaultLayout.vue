@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import {
   Document,
   Menu as IconMenu,
   Setting,
   User,
   Connection,
-  DataLine
+  DataLine,
+  SwitchButton,
+  ArrowDown
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const isCollapse = ref(false)
+
+const username = computed(() => localStorage.getItem('username') || '管理员')
 
 const menuItems = [
   { path: '/', title: '看板', icon: DataLine },
@@ -24,6 +29,18 @@ const menuItems = [
 
 const handleSelect = (path: string) => {
   router.push(path)
+}
+
+const handleLogout = () => {
+  ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    router.push('/login')
+  }).catch(() => {})
 }
 </script>
 
@@ -55,18 +72,37 @@ const handleSelect = (path: string) => {
 
     <div class="layout__main">
       <header class="layout__header">
-        <el-icon
-          class="collapse-btn"
-          @click="isCollapse = !isCollapse"
-        >
-          <IconMenu />
-        </el-icon>
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-          <el-breadcrumb-item v-if="route.meta.title">
-            {{ route.meta.title }}
-          </el-breadcrumb-item>
-        </el-breadcrumb>
+        <div class="header-left">
+          <el-icon
+            class="collapse-btn"
+            @click="isCollapse = !isCollapse"
+          >
+            <IconMenu />
+          </el-icon>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
+            <el-breadcrumb-item v-if="route.meta.title">
+              {{ route.meta.title }}
+            </el-breadcrumb-item>
+          </el-breadcrumb>
+        </div>
+        <div class="header-right">
+          <el-dropdown @command="handleLogout">
+            <span class="user-info">
+              <el-icon><User /></el-icon>
+              {{ username }}
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="logout">
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </header>
 
       <main class="layout__content">
@@ -99,6 +135,31 @@ const handleSelect = (path: string) => {
 
   &:hover {
     color: #409eff;
+  }
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: #606266;
+
+  &:hover {
+    color: #409eff;
+  }
+
+  .el-icon {
+    margin-right: 4px;
   }
 }
 </style>

@@ -17,6 +17,11 @@ from .serializers import (
 )
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class L2TPAccountViewSet(viewsets.ModelViewSet):
     """L2TP 账号管理接口"""
 
@@ -34,30 +39,50 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
             return L2TPAccountCreateSerializer
         return L2TPAccountSerializer
 
+    def create(self, request, *args, **kwargs):
+        logger.info(f'创建账号请求数据: {request.data}')
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            logger.error(f'创建账号验证失败: {serializer.errors}')
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         account = serializer.save()
-        # 同步到 chap-secrets
-        l2tp_service = L2TPService()
-        l2tp_service.add_user(account.username, account.password, account.assigned_ip)
+        # 同步到 chap-secrets（容器内可能不可用）
+        try:
+            l2tp_service = L2TPService()
+            l2tp_service.add_user(account.username, account.password, account.assigned_ip)
+        except Exception as e:
+            # 在 Docker 容器中可能没有 /etc/ppp 目录，忽略错误
+            SystemLog.log('l2tp', f'创建账号 {account.username} 时同步 chap-secrets 失败: {e}', level='warning', account=account)
         SystemLog.log('l2tp', f'创建账号: {account.username}', account=account)
 
     def perform_update(self, serializer):
         account = serializer.save()
-        # 同步到 chap-secrets
-        l2tp_service = L2TPService()
-        l2tp_service.update_user(account.username, account.password, account.assigned_ip)
+        # 同步到 chap-secrets（容器内可能不可用）
+        try:
+            l2tp_service = L2TPService()
+            l2tp_service.update_user(account.username, account.password, account.assigned_ip)
+        except Exception as e:
+            SystemLog.log('l2tp', f'更新账号 {account.username} 时同步 chap-secrets 失败: {e}', level='warning', account=account)
         SystemLog.log('l2tp', f'更新账号: {account.username}', account=account)
 
     @transaction.atomic
     def perform_destroy(self, instance):
         # 停止代理
-        if instance.proxy_config and instance.proxy_config.is_running:
-            gost_service = GostService()
-            gost_service.stop(instance.proxy_config.listen_port)
+        try:
+            if instance.proxy_config and instance.proxy_config.is_running:
+                gost_service = GostService()
+                gost_service.stop(instance.proxy_config.listen_port)
+        except Exception:
+            pass
 
         # 从 chap-secrets 删除
-        l2tp_service = L2TPService()
-        l2tp_service.remove_user(instance.username)
+        try:
+            l2tp_service = L2TPService()
+            l2tp_service.remove_user(instance.username)
+        except Exception:
+            pass
 
         SystemLog.log('l2tp', f'删除账号: {instance.username}')
         instance.delete()
@@ -69,12 +94,15 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
         account.is_active = not account.is_active
         account.save()
 
-        # 同步到 chap-secrets
-        l2tp_service = L2TPService()
-        if account.is_active:
-            l2tp_service.add_user(account.username, account.password, account.assigned_ip)
-        else:
-            l2tp_service.remove_user(account.username)
+        # 同步到 chap-secrets（容器内可能不可用）
+        try:
+            l2tp_service = L2TPService()
+            if account.is_active:
+                l2tp_service.add_user(account.username, account.password, account.assigned_ip)
+            else:
+                l2tp_service.remove_user(account.username)
+        except Exception:
+            pass
 
         SystemLog.log('l2tp', f'账号状态变更: {account.username} -> {"启用" if account.is_active else "禁用"}',
                       account=account)
@@ -105,7 +133,6 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
             return Response({'error': '数量必须在 1-100 之间'}, status=status.HTTP_400_BAD_REQUEST)
 
         created = []
-        l2tp_service = L2TPService()
 
         for i in range(count):
             next_ip = L2TPAccount.get_next_available_ip()
@@ -121,7 +148,12 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
                 assigned_ip=next_ip
             )
 
-            l2tp_service.add_user(username, password, next_ip)
+            # 同步到 chap-secrets（容器内可能不可用）
+            try:
+                l2tp_service = L2TPService()
+                l2tp_service.add_user(username, password, next_ip)
+            except Exception:
+                pass
 
             # 创建代理配置
             from apps.network.models import ProxyConfig, RoutingTable
