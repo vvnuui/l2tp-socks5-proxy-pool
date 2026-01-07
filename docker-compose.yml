@@ -10,6 +10,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     networks:
       - socks_network
     healthcheck:
@@ -26,6 +28,8 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - socks_network
     healthcheck:
@@ -34,24 +38,25 @@ services:
       timeout: 5s
       retries: 5
 
-  # Django 后端
+  # Django 后端 (使用 host 网络模式以访问 PPP 接口和 Gost)
   backend:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
     container_name: socks_backend
     restart: unless-stopped
+    network_mode: host
     environment:
       - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      - DB_HOST=postgres
+      - DB_HOST=127.0.0.1
       - DB_PORT=5432
       - DB_NAME=${DB_NAME:-socks_proxy}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+      - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - backend_logs:/app/logs
@@ -60,17 +65,13 @@ services:
       - /etc/iproute2:/etc/iproute2
       - /var/log/gost:/var/log/gost
       - /var/run/gost:/var/run/gost
-    ports:
-      - "8000:8000"
+      # 挂载 Gost 二进制文件
+      - /usr/local/bin/gost:/usr/local/bin/gost:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - socks_network
-    # 如需访问主机网络组件，取消下面的注释
-    # network_mode: host
 
   # Celery Worker
   celery:
@@ -121,19 +122,16 @@ services:
     networks:
       - socks_network
 
-  # Vue 前端 + Nginx
+  # Vue 前端 + Nginx (使用 host 网络模式)
   frontend:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
     container_name: socks_frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
+    network_mode: host
     depends_on:
       - backend
-    networks:
-      - socks_network
 
 volumes:
   postgres_data:

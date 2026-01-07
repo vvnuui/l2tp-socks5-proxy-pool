@@ -116,12 +116,17 @@ class L2TPAccountListSerializer(serializers.ModelSerializer):
 
     is_online = serializers.ReadOnlyField()
     proxy_port = serializers.SerializerMethodField()
+    proxy_running = serializers.SerializerMethodField()
 
     class Meta:
         model = L2TPAccount
         fields = ['id', 'username', 'assigned_ip', 'is_active', 'is_online',
-                  'proxy_port', 'created_at']
+                  'proxy_port', 'proxy_running', 'created_at']
 
     def get_proxy_port(self, obj):
         config = obj.proxy_config
         return config.listen_port if config else None
+
+    def get_proxy_running(self, obj):
+        config = obj.proxy_config
+        return config.is_running if config else False
