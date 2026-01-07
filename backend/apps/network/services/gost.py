@@ -76,12 +76,12 @@ class GostService:
         return False
 
     def start(self, port: int, bind_ip: str, interface: str = '') -> int:
-        """启动 Socks5 代理
+        """启动 Socks5 代理 (Gost v3)
 
         Args:
             port: 监听端口
-            bind_ip: 绑定出口 IP
-            interface: 绑定接口名 (可选)
+            bind_ip: 绑定出口 IP (保留参数，用于日志记录)
+            interface: 绑定接口名 (必需，如 ppp0)，出站流量将通过此接口
 
         Returns:
             进程 PID
@@ -92,18 +92,16 @@ class GostService:
         if self.is_running(port):
             raise GostError(f'端口 {port} 的代理已在运行')
 
+        if not interface:
+            raise GostError('必须指定绑定接口 (interface)')
+
         log_file = self._get_log_file(port)
 
-        # 构建命令
-        if interface:
-            forward = f'forward://{bind_ip}:0?interface={interface}'
-        else:
-            forward = f'forward://{bind_ip}:0'
-
+        # 构建命令：Gost v3 使用 URL 参数 interface 绑定出站接口
+        # 格式: gost -L socks5://:port?interface=ppp0
         cmd = [
             self.bin_path,
-            '-L', f'socks5://0.0.0.0:{port}',
-            '-F', forward
+            '-L', f'socks5://:{port}?interface={interface}'
         ]
 
         try:
@@ -116,11 +114,11 @@ class GostService:
                 )
 
             self._write_pid(port, process.pid)
-            logger.info(f'Gost 代理已启动: 端口={port}, PID={process.pid}')
+            logger.info(f'Gost 代理已启动: 端口={port}, 接口={interface}, PID={process.pid}')
 
             SystemLog.log_proxy(
                 f'代理启动成功: 端口 {port}',
-                details={'port': port, 'bind_ip': bind_ip, 'pid': process.pid}
+                details={'port': port, 'interface': interface, 'bind_ip': bind_ip, 'pid': process.pid}
             )
 
             return process.pid

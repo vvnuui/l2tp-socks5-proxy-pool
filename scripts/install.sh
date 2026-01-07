@@ -33,7 +33,7 @@ IP_RANGE_END="${IP_RANGE_END:-10.0.3.254}"
 IPSEC_PSK="${IPSEC_PSK:-your-preshared-key-change-me}"
 API_URL="${API_URL:-http://127.0.0.1:8000}"
 PPP_HOOK_TOKEN="${PPP_HOOK_TOKEN:-your-secret-token-change-me}"
-GOST_VERSION="${GOST_VERSION:-2.11.5}"
+GOST_VERSION="${GOST_VERSION:-3.0.0-rc10}"
 
 # 安装依赖包
 install_dependencies() {
@@ -232,7 +232,28 @@ if [ -f "\$PID_FILE" ]; then
     rm -f "\$PID_FILE"
 fi
 
-# 启动 Gost 代理
+# 获取路由表 ID（从 API 响应或使用端口号）
+TABLE_ID=\$(echo "\$PROXY_INFO" | sed -n 's/.*"table_id":\([0-9]*\).*/\1/p' | head -1)
+if [ -z "\$TABLE_ID" ]; then
+    TABLE_ID=\$PORT
+fi
+TABLE_NAME="rt_proxy_\${PORT}"
+
+# 配置策略路由：让来自 LOCAL_IP (服务器 PPP IP) 的流量通过 PEER_IP (客户端) 出去
+# 1. 添加路由表（如果不存在）
+grep -q "^\$TABLE_ID " /etc/iproute2/rt_tables || echo "\$TABLE_ID \$TABLE_NAME" >> /etc/iproute2/rt_tables
+
+# 2. 添加默认路由通过客户端
+ip route replace default via \$PEER_IP dev \$INTERFACE table \$TABLE_NAME 2>/dev/null
+
+# 3. 添加路由规则：来自服务器 PPP IP 的流量使用此路由表
+ip rule del from \$LOCAL_IP table \$TABLE_NAME 2>/dev/null
+ip rule add from \$LOCAL_IP table \$TABLE_NAME priority 100
+
+logger -t ppp-hook "Routing configured: \$LOCAL_IP -> \$PEER_IP via \$INTERFACE (table \$TABLE_NAME)"
+
+# 启动 Gost v3 代理，使用 interface 参数绑定到 PPP 接口
+# 这样出站流量会通过 PPP 接口，经过客户端的 NAT 从客户端公网 IP 出去
 LOG_FILE="\$GOST_LOG_DIR/gost_\${PORT}.log"
 \$GOST_BIN -L "socks5://:\${PORT}?interface=\${INTERFACE}" \\
     >> "\$LOG_FILE" 2>&1 &
@@ -240,19 +261,20 @@ LOG_FILE="\$GOST_LOG_DIR/gost_\${PORT}.log"
 NEW_PID=\$!
 echo "\$NEW_PID" > "\$PID_FILE"
 
-logger -t ppp-hook "Started Gost PID=\$NEW_PID on port \$PORT via \$INTERFACE"
+logger -t ppp-hook "Started Gost v3 PID=\$NEW_PID on port \$PORT, interface=\$INTERFACE, exit_via=\$PEER_IP"
 
 exit 0
 EOF
     chmod +x /etc/ppp/ip-up.d/99-socks-proxy
 
-    # ip-down 钩子（包含 Gost 自动停止）
+    # ip-down 钩子（包含 Gost 自动停止和路由清理）
     cat > /etc/ppp/ip-down.d/99-socks-proxy << EOF
 #!/bin/bash
 #
 # PPP 连接断开时的回调脚本
 # 1. 通知 API 客户端下线
-# 2. 自动停止 Gost 代理
+# 2. 清理策略路由
+# 3. 自动停止 Gost 代理
 #
 
 INTERFACE=\$1
@@ -276,18 +298,24 @@ curl -s -X POST "\${API_URL}/api/ppp/callback/" \\
     -H "X-PPP-Token: \${TOKEN}" \\
     -d "{\"action\": \"down\", \"interface\": \"\$INTERFACE\", \"local_ip\": \"\$PEER_IP\", \"peer_ip\": \"\$LOCAL_IP\"}" || true
 
-# 停止通过该接口的 Gost 进程
+# 停止绑定到该服务器 PPP IP 的 Gost 进程
 for PID_FILE in "\$GOST_PID_DIR"/gost_*.pid; do
     if [ -f "\$PID_FILE" ]; then
         PID=\$(cat "\$PID_FILE")
         PORT=\$(basename "\$PID_FILE" | sed 's/gost_\([0-9]*\)\.pid/\1/')
 
         if kill -0 "\$PID" 2>/dev/null; then
-            # 检查进程命令行是否包含该接口
+            # 检查进程命令行是否绑定到该接口
             if grep -q "\$INTERFACE" /proc/\$PID/cmdline 2>/dev/null; then
                 kill "\$PID" 2>/dev/null
                 rm -f "\$PID_FILE"
-                logger -t ppp-hook "Stopped Gost PID=\$PID on port \$PORT"
+                logger -t ppp-hook "Stopped Gost PID=\$PID on port \$PORT (interface=\$INTERFACE)"
+
+                # 清理策略路由
+                TABLE_NAME="rt_proxy_\${PORT}"
+                ip rule del from \$LOCAL_IP table \$TABLE_NAME 2>/dev/null
+                ip route del default table \$TABLE_NAME 2>/dev/null
+                logger -t ppp-hook "Cleaned up routing for \$LOCAL_IP (table \$TABLE_NAME)"
             fi
         else
             rm -f "\$PID_FILE"
@@ -302,13 +330,19 @@ EOF
     log_info "PPP 钩子脚本配置完成"
 }
 
-# 安装 Gost
+# 安装 Gost v3
 install_gost() {
     log_info "安装 Gost v${GOST_VERSION}..."
 
     if command -v gost &> /dev/null; then
-        log_warn "Gost 已安装"
-        return
+        CURRENT_VERSION=$(gost -V 2>&1 | head -1)
+        log_warn "Gost 已安装: $CURRENT_VERSION"
+        # 检查是否需要升级到 v3
+        if [[ "$CURRENT_VERSION" == *"2."* ]]; then
+            log_info "检测到 Gost v2，将升级到 v3..."
+        else
+            return
+        fi
     fi
 
     ARCH=$(uname -m)
@@ -318,13 +352,15 @@ install_gost() {
         *) log_error "不支持的架构: $ARCH"; exit 1 ;;
     esac
 
-    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
+    # Gost v3 使用 tar.gz 格式
+    GOST_URL="https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
 
-    log_info "下载 Gost: $GOST_URL"
-    wget -q -O /tmp/gost.gz "$GOST_URL"
-    gunzip -f /tmp/gost.gz
+    log_info "下载 Gost v3: $GOST_URL"
+    wget -q -O /tmp/gost.tar.gz "$GOST_URL"
+    tar -xzf /tmp/gost.tar.gz -C /tmp
     mv /tmp/gost /usr/local/bin/gost
     chmod +x /usr/local/bin/gost
+    rm -f /tmp/gost.tar.gz
 
     # 创建目录
     mkdir -p /var/log/gost /var/run/gost

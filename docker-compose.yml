@@ -46,6 +46,9 @@ services:
     container_name: socks_backend
     restart: unless-stopped
     network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}

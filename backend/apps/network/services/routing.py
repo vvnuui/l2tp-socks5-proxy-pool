@@ -81,7 +81,7 @@ class RoutingService:
             raise RoutingError(f'创建路由表失败: {e}')
 
     def setup_routing(self, interface: str, table_id: int, table_name: str, proxy_port: int) -> bool:
-        """配置策略路由
+        """配置策略路由 (基于 fwmark，已废弃，推荐使用 setup_source_routing)
 
         Args:
             interface: PPP 接口名 (ppp0, ppp1, ...)
@@ -121,6 +121,77 @@ class RoutingService:
             return True
 
         except RoutingError:
+            return False
+
+    def setup_source_routing(self, interface: str, table_id: int, table_name: str,
+                             local_ip: str, peer_ip: str) -> bool:
+        """配置基于源 IP 的策略路由
+
+        让来自 local_ip 的流量通过 peer_ip (L2TP 客户端) 转发出去
+
+        Args:
+            interface: PPP 接口名 (ppp0, ppp1, ...)
+            table_id: 路由表 ID
+            table_name: 路由表名称
+            local_ip: 本地 PPP IP (服务器端，如 10.0.0.1)
+            peer_ip: 对端 IP (客户端，如 10.0.0.2)
+
+        Returns:
+            是否配置成功
+        """
+        try:
+            # 1. 创建路由表
+            self.create_routing_table(table_id, table_name)
+
+            # 2. 添加默认路由：通过 peer_ip 出去
+            self._run_cmd([
+                'ip', 'route', 'replace', 'default',
+                'via', peer_ip, 'dev', interface, 'table', table_name
+            ], check=False)
+
+            # 3. 添加路由策略：来自 local_ip 的流量使用此路由表
+            # 先删除可能存在的旧规则
+            self._run_cmd(['ip', 'rule', 'del', 'from', local_ip, 'table', table_name], check=False)
+            self._run_cmd([
+                'ip', 'rule', 'add', 'from', local_ip, 'table', table_name, 'priority', '100'
+            ], check=True)
+
+            logger.info(f'源路由配置完成: {local_ip} -> {peer_ip} via {interface}')
+            SystemLog.log_routing(
+                f'源路由配置完成: {interface}',
+                interface=interface,
+                details={'table_id': table_id, 'local_ip': local_ip, 'peer_ip': peer_ip}
+            )
+            return True
+
+        except RoutingError as e:
+            logger.error(f'源路由配置失败: {e}')
+            return False
+
+    def cleanup_source_routing(self, table_id: int, table_name: str, local_ip: str) -> bool:
+        """清理基于源 IP 的策略路由
+
+        Args:
+            table_id: 路由表 ID
+            table_name: 路由表名称
+            local_ip: 本地 PPP IP
+
+        Returns:
+            是否清理成功
+        """
+        try:
+            # 1. 删除路由策略
+            self._run_cmd(['ip', 'rule', 'del', 'from', local_ip, 'table', table_name], check=False)
+
+            # 2. 删除路由
+            self._run_cmd(['ip', 'route', 'del', 'default', 'table', table_name], check=False)
+
+            logger.info(f'源路由清理完成: {local_ip}, table={table_name}')
+            SystemLog.log_routing(f'源路由清理完成: table={table_name}')
+            return True
+
+        except Exception as e:
+            logger.error(f'清理源路由失败: {e}')
             return False
 
     def cleanup_routing(self, interface: str, table_id: int, table_name: str, proxy_port: int) -> bool:

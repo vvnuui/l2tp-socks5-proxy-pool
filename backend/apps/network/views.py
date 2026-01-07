@@ -51,10 +51,29 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
 
         try:
             connection = account.current_connection
+            routing_table = account.routing_table
+
+            # IP 说明:
+            # connection.peer_ip = 服务器 PPP IP (如 10.0.0.1)，Gost 绑定此 IP
+            # connection.local_ip = 客户端分配的 IP (如 10.0.0.2)，流量路由到此 IP
+            server_ppp_ip = connection.peer_ip
+            client_ip = connection.local_ip
+
+            # 1. 配置策略路由：让来自 server_ppp_ip 的流量通过 client_ip 出去
+            routing_service = RoutingService()
+            routing_service.setup_source_routing(
+                interface=connection.interface,
+                table_id=routing_table.table_id,
+                table_name=routing_table.table_name,
+                local_ip=server_ppp_ip,
+                peer_ip=client_ip
+            )
+
+            # 2. 启动 Gost，绑定到服务器 PPP IP
             gost_service = GostService()
             pid = gost_service.start(
                 port=proxy.listen_port,
-                bind_ip=account.assigned_ip,
+                bind_ip=server_ppp_ip,
                 interface=connection.interface
             )
 
@@ -65,7 +84,9 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
             return Response({
                 'message': '代理启动成功',
                 'pid': pid,
-                'port': proxy.listen_port
+                'port': proxy.listen_port,
+                'bind_ip': server_ppp_ip,
+                'exit_via': client_ip
             })
 
         except Exception as e:
@@ -76,13 +97,29 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
     def stop(self, request, pk=None):
         """停止代理"""
         proxy = self.get_object()
+        account = proxy.account
 
         if not proxy.is_running:
             return Response({'error': '代理未在运行'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            # 1. 停止 Gost
             gost_service = GostService()
             gost_service.stop(proxy.listen_port)
+
+            # 2. 清理策略路由
+            try:
+                routing_table = account.routing_table
+                connection = account.current_connection
+                if connection:
+                    routing_service = RoutingService()
+                    routing_service.cleanup_source_routing(
+                        table_id=routing_table.table_id,
+                        table_name=routing_table.table_name,
+                        local_ip=connection.peer_ip  # 服务器 PPP IP
+                    )
+            except Exception:
+                pass  # 路由清理失败不影响停止操作
 
             proxy.gost_pid = None
             proxy.is_running = False
@@ -91,7 +128,7 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
             return Response({'message': '代理停止成功'})
 
         except Exception as e:
-            SystemLog.log_error('proxy', f'停止代理失败: {e}', account=proxy.account)
+            SystemLog.log_error('proxy', f'停止代理失败: {e}', account=account)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'])
@@ -105,10 +142,26 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
 
         try:
             connection = account.current_connection
+            routing_table = account.routing_table
+
+            server_ppp_ip = connection.peer_ip
+            client_ip = connection.local_ip
+
+            # 1. 重新配置策略路由
+            routing_service = RoutingService()
+            routing_service.setup_source_routing(
+                interface=connection.interface,
+                table_id=routing_table.table_id,
+                table_name=routing_table.table_name,
+                local_ip=server_ppp_ip,
+                peer_ip=client_ip
+            )
+
+            # 2. 重启 Gost
             gost_service = GostService()
             pid = gost_service.restart(
                 port=proxy.listen_port,
-                bind_ip=account.assigned_ip,
+                bind_ip=server_ppp_ip,
                 interface=connection.interface
             )
 
@@ -118,7 +171,9 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
 
             return Response({
                 'message': '代理重启成功',
-                'pid': pid
+                'pid': pid,
+                'bind_ip': server_ppp_ip,
+                'exit_via': client_ip
             })
 
         except Exception as e:

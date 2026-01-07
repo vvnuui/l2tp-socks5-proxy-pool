@@ -124,7 +124,13 @@ class PPPCallbackView(APIView):
             status='online'
         )
 
-        # 更新路由表和启动代理（容器内可能不可用）
+        # 更新路由表和启动代理
+        # IP 说明:
+        # peer_ip = 服务器 PPP IP (如 10.0.0.1)，Gost 绑定此 IP
+        # local_ip = 客户端分配的 IP (如 10.0.0.2)，流量路由到此 IP
+        server_ppp_ip = peer_ip
+        client_ip = local_ip
+
         try:
             routing_table = account.routing_table
             routing_table.interface = interface
@@ -135,11 +141,13 @@ class PPPCallbackView(APIView):
             proxy_config = account.proxy_config
 
             if proxy_config:
-                routing_service.setup_routing(
+                # 配置基于源 IP 的策略路由
+                routing_service.setup_source_routing(
                     interface=interface,
                     table_id=routing_table.table_id,
                     table_name=routing_table.table_name,
-                    proxy_port=proxy_config.listen_port
+                    local_ip=server_ppp_ip,
+                    peer_ip=client_ip
                 )
 
                 # 自动启动代理
@@ -148,7 +156,7 @@ class PPPCallbackView(APIView):
                     try:
                         pid = gost_service.start(
                             port=proxy_config.listen_port,
-                            bind_ip=local_ip,
+                            bind_ip=server_ppp_ip,
                             interface=interface
                         )
                         proxy_config.gost_pid = pid
