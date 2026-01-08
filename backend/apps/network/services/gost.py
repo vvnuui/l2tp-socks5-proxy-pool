@@ -32,6 +32,57 @@ class GostService:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.pid_dir.mkdir(parents=True, exist_ok=True)
 
+    def _open_firewall_port(self, port: int) -> bool:
+        """开放防火墙端口
+
+        Args:
+            port: 要开放的端口
+
+        Returns:
+            是否成功
+        """
+        try:
+            # 检查规则是否已存在
+            check_cmd = ['iptables', '-C', 'INPUT', '-p', 'tcp', '--dport', str(port), '-j', 'ACCEPT']
+            result = subprocess.run(check_cmd, capture_output=True)
+
+            if result.returncode == 0:
+                logger.debug(f'防火墙端口 {port} 已开放')
+                return True
+
+            # 添加规则
+            add_cmd = ['iptables', '-A', 'INPUT', '-p', 'tcp', '--dport', str(port), '-j', 'ACCEPT']
+            subprocess.run(add_cmd, check=True, capture_output=True)
+            logger.info(f'防火墙端口已开放: {port}')
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f'开放防火墙端口失败: {port}, 错误: {e}')
+            return False
+        except FileNotFoundError:
+            logger.warning('iptables 命令不可用，跳过防火墙配置')
+            return True
+
+    def _close_firewall_port(self, port: int) -> bool:
+        """关闭防火墙端口
+
+        Args:
+            port: 要关闭的端口
+
+        Returns:
+            是否成功
+        """
+        try:
+            # 删除规则
+            del_cmd = ['iptables', '-D', 'INPUT', '-p', 'tcp', '--dport', str(port), '-j', 'ACCEPT']
+            subprocess.run(del_cmd, capture_output=True)  # 不检查返回值，规则可能不存在
+            logger.info(f'防火墙端口已关闭: {port}')
+            return True
+
+        except FileNotFoundError:
+            logger.warning('iptables 命令不可用，跳过防火墙配置')
+            return True
+
     def _get_pid_file(self, port: int) -> Path:
         """获取 PID 文件路径"""
         return self.pid_dir / f'{port}.pid'
@@ -114,6 +165,10 @@ class GostService:
                 )
 
             self._write_pid(port, process.pid)
+
+            # 开放防火墙端口
+            self._open_firewall_port(port)
+
             logger.info(f'Gost 代理已启动: 端口={port}, 接口={interface}, PID={process.pid}')
 
             SystemLog.log_proxy(
@@ -160,6 +215,8 @@ class GostService:
             return False
         finally:
             self._remove_pid(port)
+            # 关闭防火墙端口
+            self._close_firewall_port(port)
 
         return True
 

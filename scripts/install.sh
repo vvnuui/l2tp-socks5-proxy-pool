@@ -263,6 +263,12 @@ echo "\$NEW_PID" > "\$PID_FILE"
 
 logger -t ppp-hook "Started Gost v3 PID=\$NEW_PID on port \$PORT, interface=\$INTERFACE, exit_via=\$PEER_IP"
 
+# 开放防火墙端口
+if ! iptables -C INPUT -p tcp --dport \$PORT -j ACCEPT 2>/dev/null; then
+    iptables -A INPUT -p tcp --dport \$PORT -j ACCEPT
+    logger -t ppp-hook "Firewall port \$PORT opened"
+fi
+
 exit 0
 EOF
     chmod +x /etc/ppp/ip-up.d/99-socks-proxy
@@ -316,6 +322,10 @@ for PID_FILE in "\$GOST_PID_DIR"/gost_*.pid; do
                 ip rule del from \$LOCAL_IP table \$TABLE_NAME 2>/dev/null
                 ip route del default table \$TABLE_NAME 2>/dev/null
                 logger -t ppp-hook "Cleaned up routing for \$LOCAL_IP (table \$TABLE_NAME)"
+
+                # 关闭防火墙端口
+                iptables -D INPUT -p tcp --dport \$PORT -j ACCEPT 2>/dev/null
+                logger -t ppp-hook "Firewall port \$PORT closed"
             fi
         else
             rm -f "\$PID_FILE"
