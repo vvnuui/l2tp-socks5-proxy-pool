@@ -43,6 +43,12 @@ const router = createRouter({
           name: 'Logs',
           component: () => import('@/views/Logs.vue'),
           meta: { title: '系统日志' }
+        },
+        {
+          path: 'settings',
+          name: 'Settings',
+          component: () => import('@/views/Settings.vue'),
+          meta: { title: '系统设置' }
         }
       ]
     }

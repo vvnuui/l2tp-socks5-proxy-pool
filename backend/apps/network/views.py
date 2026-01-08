@@ -10,14 +10,15 @@ from apps.accounts.models import L2TPAccount
 from apps.connections.models import Connection
 from apps.logs.models import SystemLog
 
-from .models import ProxyConfig, RoutingTable
+from .models import ProxyConfig, RoutingTable, ServerConfig
 from .serializers import (
     DashboardStatsSerializer,
     ProxyConfigCreateSerializer,
     ProxyConfigSerializer,
     RoutingTableSerializer,
+    ServerConfigSerializer,
 )
-from .services import GostService, RoutingService
+from .services import GostService, IPDetectService, RoutingService
 
 
 class ProxyConfigViewSet(viewsets.ModelViewSet):
@@ -81,11 +82,23 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
             proxy.is_running = True
             proxy.save()
 
+            # 3. 检测出口 IP（延迟执行以确保代理已就绪）
+            import time
+            exit_ip = None
+            for attempt in range(3):
+                time.sleep(2)
+                exit_ip = IPDetectService.get_exit_ip_via_proxy(proxy.listen_port)
+                if exit_ip:
+                    proxy.exit_ip = exit_ip
+                    proxy.save(update_fields=['exit_ip'])
+                    break
+
             return Response({
                 'message': '代理启动成功',
                 'pid': pid,
                 'port': proxy.listen_port,
                 'bind_ip': server_ppp_ip,
+                'exit_ip': exit_ip,
                 'exit_via': client_ip
             })
 
@@ -123,6 +136,7 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
 
             proxy.gost_pid = None
             proxy.is_running = False
+            proxy.exit_ip = None
             proxy.save()
 
             return Response({'message': '代理停止成功'})
@@ -169,10 +183,22 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
             proxy.is_running = True
             proxy.save()
 
+            # 3. 检测出口 IP
+            import time
+            exit_ip = None
+            for attempt in range(3):
+                time.sleep(2)
+                exit_ip = IPDetectService.get_exit_ip_via_proxy(proxy.listen_port)
+                if exit_ip:
+                    proxy.exit_ip = exit_ip
+                    proxy.save(update_fields=['exit_ip'])
+                    break
+
             return Response({
                 'message': '代理重启成功',
                 'pid': pid,
                 'bind_ip': server_ppp_ip,
+                'exit_ip': exit_ip,
                 'exit_via': client_ip
             })
 
@@ -205,9 +231,12 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def start_all(self, request):
         """启动所有可用代理"""
+        import time
         gost_service = GostService()
+        routing_service = RoutingService()
         started = 0
         failed = 0
+        started_proxies = []
 
         for proxy in ProxyConfig.objects.filter(is_running=False, auto_start=True):
             account = proxy.account
@@ -216,17 +245,44 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
 
             try:
                 connection = account.current_connection
+                routing_table = account.routing_table
+                server_ppp_ip = connection.peer_ip
+                client_ip = connection.local_ip
+
+                # 配置策略路由
+                routing_service.setup_source_routing(
+                    interface=connection.interface,
+                    table_id=routing_table.table_id,
+                    table_name=routing_table.table_name,
+                    local_ip=server_ppp_ip,
+                    peer_ip=client_ip
+                )
+
+                # 启动 Gost
                 pid = gost_service.start(
                     port=proxy.listen_port,
-                    bind_ip=account.assigned_ip,
+                    bind_ip=server_ppp_ip,
                     interface=connection.interface
                 )
                 proxy.gost_pid = pid
                 proxy.is_running = True
                 proxy.save()
                 started += 1
+                started_proxies.append(proxy)
             except Exception:
                 failed += 1
+
+        # 等待代理就绪后检测出口 IP
+        if started_proxies:
+            time.sleep(3)
+            for proxy in started_proxies:
+                try:
+                    exit_ip = IPDetectService.get_exit_ip_via_proxy(proxy.listen_port)
+                    if exit_ip:
+                        proxy.exit_ip = exit_ip
+                        proxy.save(update_fields=['exit_ip'])
+                except Exception:
+                    pass
 
         return Response({'started': started, 'failed': failed})
 
@@ -247,6 +303,26 @@ class ProxyConfigViewSet(viewsets.ModelViewSet):
                 pass
 
         return Response({'stopped': stopped})
+
+    @action(detail=False, methods=['post'])
+    def refresh_exit_ips(self, request):
+        """刷新所有运行中代理的出口 IP"""
+        updated = 0
+        failed = 0
+
+        for proxy in ProxyConfig.objects.filter(is_running=True):
+            try:
+                exit_ip = IPDetectService.get_exit_ip_via_proxy(proxy.listen_port)
+                if exit_ip:
+                    proxy.exit_ip = exit_ip
+                    proxy.save(update_fields=['exit_ip'])
+                    updated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+
+        return Response({'updated': updated, 'failed': failed})
 
 
 class RoutingTableViewSet(viewsets.ReadOnlyModelViewSet):
@@ -302,3 +378,59 @@ class DashboardView(APIView):
                 for c in recent_connections
             ]
         })
+
+
+class ServerConfigView(APIView):
+    """服务器配置接口（单例）"""
+
+    def _auto_detect_ips(self, config: ServerConfig) -> bool:
+        """自动检测并更新 IP 地址，返回是否有更新"""
+        ips = IPDetectService.detect_all()
+        updated = False
+
+        if ips['public_ip'] and ips['public_ip'] != config.public_ip:
+            config.public_ip = ips['public_ip']
+            updated = True
+
+        if ips['private_ip'] and ips['private_ip'] != config.private_ip:
+            config.private_ip = ips['private_ip']
+            updated = True
+
+        if updated:
+            config.save()
+
+        return updated
+
+    def get(self, request):
+        """获取服务器配置（自动检测 IP）"""
+        config = ServerConfig.get_instance()
+        # 自动检测 IP
+        self._auto_detect_ips(config)
+        serializer = ServerConfigSerializer(config)
+        return Response(serializer.data)
+
+    def put(self, request):
+        """更新服务器配置（仅允许修改域名）"""
+        config = ServerConfig.get_instance()
+        # 只允许更新 domain 字段
+        update_data = {}
+        if 'domain' in request.data:
+            update_data['domain'] = request.data['domain']
+
+        serializer = ServerConfigSerializer(config, data=update_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request):
+        """手动刷新 IP 地址"""
+        config = ServerConfig.get_instance()
+        ips = IPDetectService.detect_all()
+
+        config.public_ip = ips['public_ip']
+        config.private_ip = ips['private_ip']
+        config.save()
+
+        serializer = ServerConfigSerializer(config)
+        return Response(serializer.data)

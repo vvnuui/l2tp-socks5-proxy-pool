@@ -50,6 +50,7 @@ export interface ProxyConfig {
   listen_port: number
   is_running: boolean
   gost_pid: number | null
+  exit_ip: string | null
   auto_start: boolean
   is_online: boolean
   created_at: string
@@ -101,6 +102,15 @@ export interface DashboardData {
     local_ip: string
     connected_at: string
   }[]
+}
+
+// 服务器配置类型
+export interface ServerConfig {
+  domain: string
+  public_ip: string | null
+  private_ip: string | null
+  server_address: string
+  updated_at: string
 }
 
 // 分页响应类型

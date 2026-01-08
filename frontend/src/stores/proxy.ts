@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { proxyApi } from '@/api/proxy'
+import { proxyApi, serverConfigApi } from '@/api/proxy'
 import type { ProxyConfig } from '@/types'
 
 export const useProxyStore = defineStore('proxy', () => {
@@ -9,6 +9,7 @@ export const useProxyStore = defineStore('proxy', () => {
   const total = ref(0)
   const currentPage = ref(1)
   const pageSize = ref(20)
+  const serverAddress = ref('服务器IP')
 
   const runningProxies = computed(() =>
     proxies.value.filter(p => p.is_running)
@@ -35,6 +36,7 @@ export const useProxyStore = defineStore('proxy', () => {
     if (index !== -1) {
       proxies.value[index].is_running = true
       proxies.value[index].gost_pid = res.pid
+      proxies.value[index].exit_ip = res.exit_ip || null
     }
     return res
   }
@@ -45,6 +47,7 @@ export const useProxyStore = defineStore('proxy', () => {
     if (index !== -1) {
       proxies.value[index].is_running = false
       proxies.value[index].gost_pid = null
+      proxies.value[index].exit_ip = null
     }
   }
 
@@ -54,6 +57,7 @@ export const useProxyStore = defineStore('proxy', () => {
     if (index !== -1) {
       proxies.value[index].is_running = true
       proxies.value[index].gost_pid = res.pid
+      proxies.value[index].exit_ip = res.exit_ip || null
     }
     return res
   }
@@ -66,18 +70,34 @@ export const useProxyStore = defineStore('proxy', () => {
     return await proxyApi.stopAll()
   }
 
+  const refreshExitIPs = async () => {
+    return await proxyApi.refreshExitIPs()
+  }
+
+  const fetchServerAddress = async () => {
+    try {
+      const res = await serverConfigApi.get()
+      serverAddress.value = res.server_address
+    } catch {
+      // 保持默认值
+    }
+  }
+
   return {
     proxies,
     loading,
     total,
     currentPage,
     pageSize,
+    serverAddress,
     runningProxies,
     fetchProxies,
     startProxy,
     stopProxy,
     restartProxy,
     startAll,
-    stopAll
+    stopAll,
+    refreshExitIPs,
+    fetchServerAddress
   }
 })

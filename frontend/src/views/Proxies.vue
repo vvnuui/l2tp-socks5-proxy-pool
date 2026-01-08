@@ -2,12 +2,13 @@
 import { onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProxyStore } from '@/stores/proxy'
-import { Refresh, VideoPlay, VideoPause, RefreshRight } from '@element-plus/icons-vue'
+import { Refresh, VideoPlay, VideoPause, RefreshRight, Position } from '@element-plus/icons-vue'
 
 const store = useProxyStore()
 
 onMounted(() => {
   store.fetchProxies()
+  store.fetchServerAddress()
 })
 
 const handleStart = async (id: number) => {
@@ -67,6 +68,16 @@ const handleStopAll = async () => {
   }
 }
 
+const handleRefreshExitIPs = async () => {
+  try {
+    const res = await store.refreshExitIPs()
+    ElMessage.success(`已更新 ${res.updated} 个出口 IP`)
+    store.fetchProxies()
+  } catch (e) {
+    // 错误已处理
+  }
+}
+
 const handlePageChange = (page: number) => {
   store.currentPage = page
   store.fetchProxies()
@@ -84,6 +95,7 @@ const copyToClipboard = (text: string) => {
       <h2 class="page-header__title">代理管理</h2>
       <div class="page-header__actions">
         <el-button :icon="Refresh" @click="store.fetchProxies()">刷新</el-button>
+        <el-button :icon="Position" @click="handleRefreshExitIPs">刷新出口IP</el-button>
         <el-button type="success" :icon="VideoPlay" @click="handleStartAll">全部启动</el-button>
         <el-button type="danger" :icon="VideoPause" @click="handleStopAll">全部停止</el-button>
       </div>
@@ -104,11 +116,16 @@ const copyToClipboard = (text: string) => {
           </template>
         </el-table-column>
         <el-table-column prop="username" label="绑定账号" width="130" />
-        <el-table-column prop="assigned_ip" label="出口 IP" width="130">
+        <el-table-column label="出口 IP" width="140">
           <template #default="{ row }">
-            <el-link type="primary" @click="copyToClipboard(row.assigned_ip)">
-              {{ row.assigned_ip }}
+            <el-link
+              v-if="row.exit_ip"
+              type="primary"
+              @click="copyToClipboard(row.exit_ip)"
+            >
+              {{ row.exit_ip }}
             </el-link>
+            <span v-else class="text-muted">{{ row.is_running ? '检测中...' : '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="账号状态" width="100">
@@ -141,9 +158,9 @@ const copyToClipboard = (text: string) => {
           <template #default="{ row }">
             <el-link
               type="primary"
-              @click="copyToClipboard(`socks5://服务器IP:${row.listen_port}`)"
+              @click="copyToClipboard(`socks5://${store.serverAddress}:${row.listen_port}`)"
             >
-              socks5://服务器IP:{{ row.listen_port }}
+              socks5://{{ store.serverAddress }}:{{ row.listen_port }}
             </el-link>
           </template>
         </el-table-column>
@@ -196,4 +213,7 @@ const copyToClipboard = (text: string) => {
 </template>
 
 <style scoped lang="scss">
+.text-muted {
+  color: #909399;
+}
 </style>

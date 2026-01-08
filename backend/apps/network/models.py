@@ -4,6 +4,44 @@ from django.conf import settings
 from django.db import models
 
 
+class ServerConfig(models.Model):
+    """服务器配置（单例模型）"""
+
+    class Meta:
+        db_table = 'server_config'
+        verbose_name = '服务器配置'
+        verbose_name_plural = '服务器配置'
+
+    domain = models.CharField('域名', max_length=255, blank=True, default='')
+    public_ip = models.GenericIPAddressField('公网 IP', blank=True, null=True)
+    private_ip = models.GenericIPAddressField('内网 IP', blank=True, null=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    def __str__(self):
+        return f'服务器配置: {self.get_server_address()}'
+
+    def get_server_address(self):
+        """获取服务器地址，优先级：域名 > 公网IP > 内网IP"""
+        if self.domain:
+            return self.domain
+        if self.public_ip:
+            return self.public_ip
+        if self.private_ip:
+            return self.private_ip
+        return '服务器IP'
+
+    @classmethod
+    def get_instance(cls):
+        """获取单例配置，不存在则创建"""
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+    def save(self, *args, **kwargs):
+        """确保只有一条记录"""
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+
 class ProxyConfig(models.Model):
     """Socks5 代理配置模型"""
 
@@ -22,6 +60,7 @@ class ProxyConfig(models.Model):
     listen_port = models.IntegerField('监听端口', unique=True)
     is_running = models.BooleanField('运行状态', default=False)
     gost_pid = models.IntegerField('Gost进程ID', null=True, blank=True)
+    exit_ip = models.GenericIPAddressField('出口IP', blank=True, null=True)
     auto_start = models.BooleanField('自动启动', default=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)

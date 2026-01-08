@@ -6,6 +6,7 @@ import {
   Document,
   Menu as IconMenu,
   Setting,
+  Tools,
   User,
   Connection,
   DataLine,
@@ -24,7 +25,8 @@ const menuItems = [
   { path: '/accounts', title: '账号管理', icon: User },
   { path: '/connections', title: '连接状态', icon: Connection },
   { path: '/proxies', title: '代理管理', icon: Setting },
-  { path: '/logs', title: '系统日志', icon: Document }
+  { path: '/logs', title: '系统日志', icon: Document },
+  { path: '/settings', title: '系统设置', icon: Tools }
 ]
 
 const handleSelect = (path: string) => {

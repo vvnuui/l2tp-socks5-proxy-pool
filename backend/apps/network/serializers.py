@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 
-from .models import ProxyConfig, RoutingTable
+from .models import ProxyConfig, RoutingTable, ServerConfig
 
 
 class ProxyConfigSerializer(serializers.ModelSerializer):
@@ -16,10 +16,10 @@ class ProxyConfigSerializer(serializers.ModelSerializer):
         model = ProxyConfig
         fields = [
             'id', 'account', 'username', 'assigned_ip', 'listen_port',
-            'is_running', 'gost_pid', 'auto_start', 'is_online',
+            'is_running', 'gost_pid', 'exit_ip', 'auto_start', 'is_online',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'gost_pid', 'is_running', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'gost_pid', 'exit_ip', 'is_running', 'created_at', 'updated_at']
 
     def get_is_online(self, obj):
         return obj.account.is_online
@@ -63,3 +63,16 @@ class DashboardStatsSerializer(serializers.Serializer):
     accounts_active = serializers.IntegerField()
     connections_online = serializers.IntegerField()
     proxies_running = serializers.IntegerField()
+
+
+class ServerConfigSerializer(serializers.ModelSerializer):
+    """服务器配置序列化器"""
+
+    server_address = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServerConfig
+        fields = ['domain', 'public_ip', 'private_ip', 'server_address', 'updated_at']
+
+    def get_server_address(self, obj):
+        return obj.get_server_address()
