@@ -69,7 +69,29 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_destroy(self, instance):
-        # 停止代理
+        from apps.connections.models import Connection
+        from django.utils import timezone
+
+        l2tp_service = L2TPService()
+
+        # 1. 终止活跃的 PPP 连接
+        try:
+            active_conn = Connection.objects.filter(
+                account=instance,
+                status='online'
+            ).first()
+            if active_conn:
+                # 终止 PPP 连接
+                l2tp_service.terminate_connection(active_conn.interface)
+                # 更新连接状态
+                active_conn.status = 'offline'
+                active_conn.disconnected_at = timezone.now()
+                active_conn.save()
+                SystemLog.log('l2tp', f'终止连接: {active_conn.interface}', account=instance)
+        except Exception as e:
+            SystemLog.log_error('l2tp', f'终止连接失败: {e}', account=instance)
+
+        # 2. 停止代理
         try:
             if instance.proxy_config and instance.proxy_config.is_running:
                 gost_service = GostService()
@@ -77,9 +99,8 @@ class L2TPAccountViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
-        # 从 chap-secrets 删除
+        # 3. 从 chap-secrets 删除
         try:
-            l2tp_service = L2TPService()
             l2tp_service.remove_user(instance.username)
         except Exception:
             pass

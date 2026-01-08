@@ -150,6 +150,55 @@ class L2TPService:
             logger.error(f'删除用户失败: {e}')
             raise L2TPError(f'删除用户失败: {e}')
 
+    def terminate_connection(self, interface: str) -> bool:
+        """终止指定的 PPP 连接
+
+        Args:
+            interface: PPP 接口名 (如 ppp0)
+
+        Returns:
+            是否终止成功
+        """
+        try:
+            # 方法1: 通过 poff 命令终止
+            result = subprocess.run(
+                ['poff', interface],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode == 0:
+                logger.info(f'已终止 PPP 连接: {interface}')
+                return True
+
+            # 方法2: 直接 kill pppd 进程
+            # 查找与该接口关联的 pppd 进程
+            result = subprocess.run(
+                ['pgrep', '-f', f'pppd.*{interface}'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    subprocess.run(['kill', '-TERM', pid], check=False)
+                logger.info(f'已终止 PPP 连接 (kill): {interface}')
+                return True
+
+            # 方法3: 删除接口
+            subprocess.run(
+                ['ip', 'link', 'delete', interface],
+                capture_output=True,
+                check=False
+            )
+            logger.info(f'已删除 PPP 接口: {interface}')
+            return True
+
+        except Exception as e:
+            logger.error(f'终止 PPP 连接失败: {e}')
+            return False
+
     def get_users(self) -> list:
         """获取所有 L2TP 用户
 
