@@ -88,46 +88,47 @@ const handleFilterChange = () => {
         v-loading="loading"
         stripe
         style="width: 100%"
+        table-layout="fixed"
       >
-        <el-table-column prop="username" label="用户名" width="120" />
-        <el-table-column prop="interface" label="接口" width="80">
+        <el-table-column prop="username" label="用户名" min-width="100" />
+        <el-table-column label="接口" min-width="70">
           <template #default="{ row }">
             {{ row.interface || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="local_ip" label="分配 IP" width="120">
+        <el-table-column label="分配 IP" min-width="110">
           <template #default="{ row }">
             {{ row.local_ip || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="80">
+        <el-table-column label="状态" min-width="70" align="center">
           <template #default="{ row }">
             <span :class="['status-tag', `status-tag--${row.status}`]">
               {{ row.status === 'online' ? '在线' : '离线' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="连接时长" width="110">
+        <el-table-column label="连接时长" min-width="100">
           <template #default="{ row }">
             {{ row.connected_at ? formatDuration(row.duration) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="发送流量" width="100">
+        <el-table-column label="发送" min-width="90" align="right">
           <template #default="{ row }">
             {{ formatBytes(row.total_bytes_sent) }}
           </template>
         </el-table-column>
-        <el-table-column label="接收流量" width="100">
+        <el-table-column label="接收" min-width="90" align="right">
           <template #default="{ row }">
             {{ formatBytes(row.total_bytes_received) }}
           </template>
         </el-table-column>
-        <el-table-column label="总流量" width="100">
+        <el-table-column label="总流量" min-width="90" align="right">
           <template #default="{ row }">
             {{ formatBytes(row.total_bytes) }}
           </template>
         </el-table-column>
-        <el-table-column label="连接次数" width="90">
+        <el-table-column label="连接次数" min-width="80" align="center">
           <template #default="{ row }">
             {{ row.connection_count }}
           </template>
