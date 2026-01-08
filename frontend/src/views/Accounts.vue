@@ -121,8 +121,9 @@ const handlePageChange = (page: number) => {
         :data="store.accounts"
         v-loading="store.loading"
         stripe
+        style="width: 100%"
       >
-        <el-table-column prop="username" label="用户名" width="150" />
+        <el-table-column prop="username" label="用户名" width="130" />
         <el-table-column prop="assigned_ip" label="分配 IP" width="130" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -144,7 +145,7 @@ const handlePageChange = (page: number) => {
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="80">
+        <el-table-column label="启用" width="100">
           <template #default="{ row }">
             <el-switch
               :model-value="row.is_active"
@@ -152,13 +153,13 @@ const handlePageChange = (page: number) => {
             />
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip />
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">
             {{ new Date(row.created_at).toLocaleString() }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button size="small" :icon="Edit" @click="handleEdit(row)">编辑</el-button>

@@ -131,6 +131,7 @@ const getLogTypeLabel = (type: string) => {
         :data="logs"
         v-loading="loading"
         stripe
+        style="width: 100%"
       >
         <el-table-column label="时间" width="170">
           <template #default="{ row }">

@@ -79,7 +79,7 @@ onUnmounted(() => {
             <span class="card__title">PPP 接口</span>
             <el-button size="small" @click="store.fetchData">刷新</el-button>
           </div>
-          <el-table :data="store.pppInterfaces" stripe size="small">
+          <el-table :data="store.pppInterfaces" stripe size="small" style="width: 100%">
             <el-table-column prop="name" label="接口名">
               <template #default="{ row }">
                 {{ row }}
@@ -104,7 +104,7 @@ onUnmounted(() => {
               <el-button size="small" type="primary" link>查看全部</el-button>
             </router-link>
           </div>
-          <el-table :data="store.recentConnections" stripe size="small">
+          <el-table :data="store.recentConnections" stripe size="small" style="width: 100%">
             <el-table-column prop="username" label="用户名" />
             <el-table-column prop="interface" label="接口" width="80" />
             <el-table-column prop="local_ip" label="IP 地址" width="120" />

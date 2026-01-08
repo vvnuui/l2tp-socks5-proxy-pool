@@ -98,8 +98,9 @@ const handleFilterChange = () => {
         :data="connections"
         v-loading="loading"
         stripe
+        style="width: 100%"
       >
-        <el-table-column prop="username" label="用户名" width="130" />
+        <el-table-column prop="username" label="用户名" min-width="100" />
         <el-table-column prop="interface" label="接口" width="80" />
         <el-table-column prop="local_ip" label="本地 IP" width="120" />
         <el-table-column prop="peer_ip" label="对端 IP" width="120" />
@@ -110,7 +111,7 @@ const handleFilterChange = () => {
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="连接时长" width="120">
+        <el-table-column label="连接时长" width="110">
           <template #default="{ row }">
             {{ formatDuration(row.duration) }}
           </template>
@@ -125,12 +126,12 @@ const handleFilterChange = () => {
             {{ formatBytes(row.bytes_received) }}
           </template>
         </el-table-column>
-        <el-table-column label="连接时间" width="170">
+        <el-table-column label="连接时间" min-width="160">
           <template #default="{ row }">
             {{ new Date(row.connected_at).toLocaleString() }}
           </template>
         </el-table-column>
-        <el-table-column label="断开时间" width="170">
+        <el-table-column label="断开时间" min-width="160">
           <template #default="{ row }">
             {{ row.disconnected_at ? new Date(row.disconnected_at).toLocaleString() : '-' }}
           </template>

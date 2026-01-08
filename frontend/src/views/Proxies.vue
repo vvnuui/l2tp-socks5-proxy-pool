@@ -94,6 +94,7 @@ const copyToClipboard = (text: string) => {
         :data="store.proxies"
         v-loading="store.loading"
         stripe
+        style="width: 100%"
       >
         <el-table-column prop="listen_port" label="监听端口" width="100">
           <template #default="{ row }">
