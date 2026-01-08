@@ -121,7 +121,7 @@ class L2TPAccountListSerializer(serializers.ModelSerializer):
     class Meta:
         model = L2TPAccount
         fields = ['id', 'username', 'assigned_ip', 'is_active', 'is_online',
-                  'proxy_port', 'proxy_running', 'created_at']
+                  'proxy_port', 'proxy_running', 'remark', 'created_at']
 
     def get_proxy_port(self, obj):
         config = obj.proxy_config
