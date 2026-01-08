@@ -70,11 +70,10 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
             # 获取该账号的所有连接
             connections = Connection.objects.filter(account=account)
 
-            # 计算总流量
-            traffic = connections.aggregate(
+            # 计算历史总流量（已断开的连接）
+            historical_traffic = connections.filter(status='offline').aggregate(
                 total_sent=Sum('bytes_sent'),
                 total_received=Sum('bytes_received'),
-                count=Count('id')
             )
 
             # 获取当前/最新连接
@@ -90,6 +89,16 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
             if status_filter and conn_status != status_filter:
                 continue
 
+            # 计算流量：历史 + 当前会话实时流量
+            total_sent = historical_traffic['total_sent'] or 0
+            total_received = historical_traffic['total_received'] or 0
+
+            # 如果在线，读取当前接口的实时流量
+            if is_online and current_conn:
+                realtime = self._get_interface_traffic(current_conn.interface)
+                total_sent += realtime['tx_bytes']
+                total_received += realtime['rx_bytes']
+
             # 构建汇总数据
             summary = {
                 'account_id': account.id,
@@ -102,9 +111,9 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
                 'duration': current_conn.duration if current_conn else 0,
                 'connected_at': current_conn.connected_at if current_conn else None,
                 'disconnected_at': current_conn.disconnected_at if current_conn else None,
-                'total_bytes_sent': traffic['total_sent'] or 0,
-                'total_bytes_received': traffic['total_received'] or 0,
-                'connection_count': traffic['count'] or 0,
+                'total_bytes_sent': total_sent,
+                'total_bytes_received': total_received,
+                'connection_count': connections.count(),
             }
             result.append(summary)
 
@@ -116,6 +125,21 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
             'count': len(result),
             'results': serializer.data
         })
+
+    def _get_interface_traffic(self, interface: str) -> dict:
+        """读取接口实时流量统计"""
+        result = {'tx_bytes': 0, 'rx_bytes': 0}
+        try:
+            tx_path = f'/sys/class/net/{interface}/statistics/tx_bytes'
+            rx_path = f'/sys/class/net/{interface}/statistics/rx_bytes'
+
+            with open(tx_path, 'r') as f:
+                result['tx_bytes'] = int(f.read().strip())
+            with open(rx_path, 'r') as f:
+                result['rx_bytes'] = int(f.read().strip())
+        except (FileNotFoundError, ValueError, PermissionError):
+            pass
+        return result
 
 
 class PPPCallbackView(APIView):
