@@ -41,3 +41,21 @@ class ConnectionOfflineSerializer(serializers.Serializer):
     """Client 下线回调序列化器"""
 
     interface = serializers.CharField(max_length=16)
+
+
+class AccountConnectionSummarySerializer(serializers.Serializer):
+    """账号连接汇总序列化器 - 每个账号显示一条记录"""
+
+    account_id = serializers.IntegerField()
+    username = serializers.CharField()
+    assigned_ip = serializers.CharField()
+    interface = serializers.CharField(allow_blank=True)
+    peer_ip = serializers.CharField(allow_blank=True)
+    local_ip = serializers.CharField(allow_blank=True)
+    status = serializers.CharField()
+    duration = serializers.FloatField()
+    connected_at = serializers.DateTimeField(allow_null=True)
+    disconnected_at = serializers.DateTimeField(allow_null=True)
+    total_bytes_sent = serializers.IntegerField()
+    total_bytes_received = serializers.IntegerField()
+    connection_count = serializers.IntegerField()

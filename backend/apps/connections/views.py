@@ -9,13 +9,15 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db.models import Sum, Count, Max
+
 from apps.accounts.models import L2TPAccount
 from apps.logs.models import SystemLog
 from apps.network.models import ProxyConfig, RoutingTable
 from apps.network.services import GostService, RoutingService
 
 from .models import Connection
-from .serializers import ConnectionSerializer
+from .serializers import AccountConnectionSummarySerializer, ConnectionSerializer
 
 
 class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
@@ -52,6 +54,67 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
             'total': total,
             'online': online,
             'offline': total - online
+        })
+
+    @action(detail=False, methods=['get'])
+    def by_account(self, request):
+        """按账号汇总连接信息 - 每个账号仅显示一条记录"""
+        # 获取筛选参数
+        status_filter = request.query_params.get('status', '')
+
+        # 获取所有账号
+        accounts = L2TPAccount.objects.all()
+
+        result = []
+        for account in accounts:
+            # 获取该账号的所有连接
+            connections = Connection.objects.filter(account=account)
+
+            # 计算总流量
+            traffic = connections.aggregate(
+                total_sent=Sum('bytes_sent'),
+                total_received=Sum('bytes_received'),
+                count=Count('id')
+            )
+
+            # 获取当前/最新连接
+            current_conn = connections.filter(status='online').first()
+            if not current_conn:
+                current_conn = connections.order_by('-connected_at').first()
+
+            # 确定状态
+            is_online = connections.filter(status='online').exists()
+            conn_status = 'online' if is_online else 'offline'
+
+            # 应用状态筛选
+            if status_filter and conn_status != status_filter:
+                continue
+
+            # 构建汇总数据
+            summary = {
+                'account_id': account.id,
+                'username': account.username,
+                'assigned_ip': account.assigned_ip,
+                'interface': current_conn.interface if current_conn else '',
+                'peer_ip': current_conn.peer_ip if current_conn else '',
+                'local_ip': current_conn.local_ip if current_conn else '',
+                'status': conn_status,
+                'duration': current_conn.duration if current_conn else 0,
+                'connected_at': current_conn.connected_at if current_conn else None,
+                'disconnected_at': current_conn.disconnected_at if current_conn else None,
+                'total_bytes_sent': traffic['total_sent'] or 0,
+                'total_bytes_received': traffic['total_received'] or 0,
+                'connection_count': traffic['count'] or 0,
+            }
+            result.append(summary)
+
+        # 按状态和用户名排序（在线的排前面）
+        result.sort(key=lambda x: (0 if x['status'] == 'online' else 1, x['username']))
+
+        serializer = AccountConnectionSummarySerializer(result, many=True)
+        return Response({
+            'count': len(result),
+            'results': serializer.data
         })
 
 

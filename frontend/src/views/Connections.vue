@@ -2,27 +2,22 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { connectionApi } from '@/api/connection'
 import { Refresh } from '@element-plus/icons-vue'
-import type { Connection } from '@/types'
+import type { AccountConnectionSummary } from '@/types'
 
-const connections = ref<Connection[]>([])
+const connections = ref<AccountConnectionSummary[]>([])
 const loading = ref(false)
 const total = ref(0)
-const currentPage = ref(1)
-const pageSize = ref(20)
 const statusFilter = ref<string>('')
 const refreshTimer = ref<number | null>(null)
 
 const fetchConnections = async () => {
   loading.value = true
   try {
-    const params: Record<string, any> = {
-      page: currentPage.value,
-      page_size: pageSize.value
-    }
+    const params: Record<string, any> = {}
     if (statusFilter.value) {
       params.status = statusFilter.value
     }
-    const res = await connectionApi.getList(params)
+    const res = await connectionApi.getByAccount(params)
     connections.value = res.results
     total.value = res.count
   } finally {
@@ -58,18 +53,12 @@ const formatDuration = (seconds: number): string => {
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const handlePageChange = (page: number) => {
-  currentPage.value = page
-  fetchConnections()
-}
-
 const handleFilterChange = () => {
-  currentPage.value = 1
   fetchConnections()
 }
 </script>
@@ -100,10 +89,17 @@ const handleFilterChange = () => {
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="username" label="用户名" min-width="100" />
-        <el-table-column prop="interface" label="接口" width="80" />
-        <el-table-column prop="local_ip" label="本地 IP" width="120" />
-        <el-table-column prop="peer_ip" label="对端 IP" width="120" />
+        <el-table-column prop="username" label="用户名" width="120" />
+        <el-table-column prop="interface" label="接口" width="80">
+          <template #default="{ row }">
+            {{ row.interface || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="local_ip" label="分配 IP" width="120">
+          <template #default="{ row }">
+            {{ row.local_ip || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <span :class="['status-tag', `status-tag--${row.status}`]">
@@ -113,43 +109,41 @@ const handleFilterChange = () => {
         </el-table-column>
         <el-table-column label="连接时长" width="110">
           <template #default="{ row }">
-            {{ formatDuration(row.duration) }}
+            {{ row.connected_at ? formatDuration(row.duration) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="发送流量" width="100">
+        <el-table-column label="发送流量" width="110">
           <template #default="{ row }">
-            {{ formatBytes(row.bytes_sent) }}
+            {{ formatBytes(row.total_bytes_sent) }}
           </template>
         </el-table-column>
-        <el-table-column label="接收流量" width="100">
+        <el-table-column label="接收流量" width="110">
           <template #default="{ row }">
-            {{ formatBytes(row.bytes_received) }}
+            {{ formatBytes(row.total_bytes_received) }}
           </template>
         </el-table-column>
-        <el-table-column label="连接时间" min-width="160">
+        <el-table-column label="连接次数" width="90">
           <template #default="{ row }">
-            {{ new Date(row.connected_at).toLocaleString() }}
+            {{ row.connection_count }}
           </template>
         </el-table-column>
-        <el-table-column label="断开时间" min-width="160">
+        <el-table-column label="最近连接时间" min-width="160">
           <template #default="{ row }">
-            {{ row.disconnected_at ? new Date(row.disconnected_at).toLocaleString() : '-' }}
+            {{ row.connected_at ? new Date(row.connected_at).toLocaleString() : '-' }}
           </template>
         </el-table-column>
       </el-table>
 
       <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="currentPage"
-          :page-size="pageSize"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="handlePageChange"
-        />
+        <span class="total-info">共 {{ total }} 个账号</span>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
+.total-info {
+  color: #909399;
+  font-size: 14px;
+}
 </style>

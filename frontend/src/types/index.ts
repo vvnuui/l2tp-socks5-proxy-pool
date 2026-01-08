@@ -41,6 +41,23 @@ export interface Connection {
   disconnected_at: string | null
 }
 
+// 账号连接汇总类型
+export interface AccountConnectionSummary {
+  account_id: number
+  username: string
+  assigned_ip: string
+  interface: string
+  peer_ip: string
+  local_ip: string
+  status: 'online' | 'offline'
+  duration: number
+  connected_at: string | null
+  disconnected_at: string | null
+  total_bytes_sent: number
+  total_bytes_received: number
+  connection_count: number
+}
+
 // 代理配置相关类型
 export interface ProxyConfig {
   id: number
