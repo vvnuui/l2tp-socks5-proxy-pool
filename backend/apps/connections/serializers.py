@@ -58,4 +58,5 @@ class AccountConnectionSummarySerializer(serializers.Serializer):
     disconnected_at = serializers.DateTimeField(allow_null=True)
     total_bytes_sent = serializers.IntegerField()
     total_bytes_received = serializers.IntegerField()
+    total_bytes = serializers.IntegerField()
     connection_count = serializers.IntegerField()

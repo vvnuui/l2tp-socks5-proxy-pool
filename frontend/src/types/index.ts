@@ -55,6 +55,7 @@ export interface AccountConnectionSummary {
   disconnected_at: string | null
   total_bytes_sent: number
   total_bytes_received: number
+  total_bytes: number
   connection_count: number
 }
 

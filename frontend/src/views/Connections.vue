@@ -112,14 +112,19 @@ const handleFilterChange = () => {
             {{ row.connected_at ? formatDuration(row.duration) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="发送流量" width="110">
+        <el-table-column label="发送流量" width="100">
           <template #default="{ row }">
             {{ formatBytes(row.total_bytes_sent) }}
           </template>
         </el-table-column>
-        <el-table-column label="接收流量" width="110">
+        <el-table-column label="接收流量" width="100">
           <template #default="{ row }">
             {{ formatBytes(row.total_bytes_received) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="总流量" width="100">
+          <template #default="{ row }">
+            {{ formatBytes(row.total_bytes) }}
           </template>
         </el-table-column>
         <el-table-column label="连接次数" width="90">

@@ -113,6 +113,7 @@ class ConnectionViewSet(viewsets.ReadOnlyModelViewSet):
                 'disconnected_at': current_conn.disconnected_at if current_conn else None,
                 'total_bytes_sent': total_sent,
                 'total_bytes_received': total_received,
+                'total_bytes': total_sent + total_received,
                 'connection_count': connections.count(),
             }
             result.append(summary)
