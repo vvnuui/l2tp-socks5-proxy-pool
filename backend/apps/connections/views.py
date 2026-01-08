@@ -247,6 +247,8 @@ class PPPCallbackView(APIView):
         """处理 Client 下线"""
         interface = request.data.get('interface')
         local_ip = request.data.get('local_ip', '')
+        bytes_sent = request.data.get('bytes_sent', 0)
+        bytes_received = request.data.get('bytes_received', 0)
 
         if not interface:
             return Response({'error': '缺少 interface 参数'}, status=status.HTTP_400_BAD_REQUEST)
@@ -289,15 +291,18 @@ class PPPCallbackView(APIView):
         except Exception as e:
             SystemLog.log_error('routing', f'清理路由失败: {e}', account=account)
 
-        # 更新连接状态
+        # 更新连接状态和流量统计
         connection.status = 'offline'
         connection.disconnected_at = timezone.now()
+        connection.bytes_sent = bytes_sent
+        connection.bytes_received = bytes_received
         connection.save()
 
         SystemLog.log_connection(
             f'Client 下线: {account.username}',
             account=account,
-            interface=interface
+            interface=interface,
+            details={'bytes_sent': bytes_sent, 'bytes_received': bytes_received}
         )
 
         return Response({'message': 'OK'})
